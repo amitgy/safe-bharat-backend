@@ -1,3 +1,5 @@
+// ~/Documents/safe-bharat/server.js
+require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -215,4 +217,10 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-module.exports = app; // Vercel requirement
+// Start server locally, but not on Vercel
+if (!process.env.VERCEL) {
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => console.log(`Server running on port ${port}`));
+}
+
+module.exports = app;
