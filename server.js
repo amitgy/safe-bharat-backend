@@ -195,8 +195,8 @@ app.post('/api/checkins', authenticateToken, async (req, res) => {
   }
 });
 
-// New /upload Endpoint
-app.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
+// New /upload Endpoint (No Authentication)
+app.post('/upload', upload.single('file'), async (req, res) => {
   try {
     const file = new File({
       originalName: req.file.originalname,
