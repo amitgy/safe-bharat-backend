@@ -10,64 +10,82 @@ const rateLimit = require('express-rate-limit');
 const apicache = require('apicache');
 
 const app = express();
-const port = process.env.PORT || 3000;
 const parser = new Parser();
 const cache = apicache.middleware;
 
 // Middleware
 app.use(cors({ origin: process.env.FRONTEND_URL || '*' }));
 app.use(express.json());
-app.use('/uploads', express.static('uploads'));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 app.use(cache('5 minutes'));
 
 // MongoDB Atlas Connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://your-mongodb-atlas-uri/safe-bharat?retryWrites=true&w=majority', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => console.log('Connected to MongoDB Atlas'));
+mongoose
+  .connect(process.env.MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => console.log('Connected to MongoDB Atlas'))
+  .catch((err) => console.error('MongoDB connection error:', err));
 
 // Schemas
 const alertSchema = new mongoose.Schema({
   title: { type: String, required: true },
   message: { type: String, required: true },
-  time: { type: Date, default: Date.now }
+  time: { type: Date, default: Date.now },
 }, { timestamps: true });
+
 const reportSchema = new mongoose.Schema({
   description: { type: String, required: true },
   location: String,
   media: String,
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
 }, { timestamps: true });
+
 const resourceSchema = new mongoose.Schema({
   name: { type: String, required: true },
   type: String,
   address: String,
   contact: String,
-  city: String
+  city: String,
 }, { timestamps: true });
+
 const checkinSchema = new mongoose.Schema({
   message: { type: String, required: true },
   phone: { type: String, required: true },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+}, { timestamps: true });
+
+const fileSchema = new mongoose.Schema({
+  originalName: { type: String, required: true },
+  size: Number,
+  mimetype: String,
+  uploadDate: { type: Date, default: Date.now },
 }, { timestamps: true });
 
 const Alert = mongoose.model('Alert', alertSchema);
 const Report = mongoose.model('Report', reportSchema);
 const Resource = mongoose.model('Resource', resourceSchema);
 const Checkin = mongoose.model('Checkin', checkinSchema);
+const File = mongoose.model('File', fileSchema);
 
 // Multer for File Uploads
-const storage = multer.diskStorage({
-  destination: './uploads/',
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
+const upload = multer({
+  storage: multer.memoryStorage(), // Vercel-compatible
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type'), false);
+    }
+  },
 });
-const upload = multer({ storage });
 
 // Twilio Setup (Optional)
-const twilioClient = process.env.TWILIO_SID ? twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN) : null;
+const twilioClient = process.env.TWILIO_SID
+  ? twilio(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN)
+  : null;
 
 // JWT Middleware
 const authenticateToken = (req, res, next) => {
@@ -115,7 +133,7 @@ app.post('/api/alerts', authenticateToken, async (req, res) => {
 app.post('/api/reports', authenticateToken, upload.single('media'), async (req, res) => {
   try {
     const { description, location } = req.body;
-    const media = req.file ? `/uploads/${req.file.filename}` : null;
+    const media = req.file ? `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}` : null;
     const report = new Report({ description, location, media });
     await report.save();
     res.status(201).json(report);
@@ -149,7 +167,7 @@ app.get('/api/news', async (req, res) => {
       title: item.title,
       content: item.contentSnippet,
       source: 'PIB India',
-      time: new Date(item.pubDate)
+      time: new Date(item.pubDate),
     }));
     res.json(news);
   } catch (err) {
@@ -166,12 +184,28 @@ app.post('/api/checkins', authenticateToken, async (req, res) => {
       await twilioClient.messages.create({
         body: `Safe Bharat Check-In: ${message}`,
         from: process.env.TWILIO_PHONE,
-        to: phone
+        to: phone,
       });
     }
     res.status(201).json(checkin);
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// New /upload Endpoint
+app.post('/upload', authenticateToken, upload.single('file'), async (req, res) => {
+  try {
+    const file = new File({
+      originalName: req.file.originalname,
+      size: req.file.size,
+      mimetype: req.file.mimetype,
+      uploadDate: new Date(),
+    });
+    await file.save();
+    res.json({ message: 'File metadata saved!' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -181,6 +215,4 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
-});
+module.exports = app; // Vercel requirement
